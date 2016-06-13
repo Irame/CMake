@@ -282,6 +282,14 @@ public:
    * absolute paths with Windows-style backslashes.
    **/
   static std::wstring ConvertToWindowsExtendedPath(const std::string&);
+
+  /**
+  * Convert an path to a local path. If the input starts with \\?\ this 
+  * prefix will be removed; if the input is instead a network path 
+  * prefixed by \\?\UNC\, the result will be prefixed with \\. All output 
+  * will also be converted to absolute paths with Windows-style backslashes.
+  **/
+  static std::string ConvertToWindowsLocalPath(const std::wstring&);
 #endif
 
   /**

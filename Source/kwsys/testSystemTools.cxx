@@ -696,6 +696,7 @@ static bool CheckStringOperations()
     }
 
 #ifdef _WIN32
+  // ConvertToWindowsExtendedPath tests
   if (kwsys::SystemTools::ConvertToWindowsExtendedPath
       ("L:\\Local Mojo\\Hex Power Pack\\Iffy Voodoo") !=
       L"\\\\?\\L:\\Local Mojo\\Hex Power Pack\\Iffy Voodoo")
@@ -800,6 +801,100 @@ static bool CheckStringOperations()
     res = false;
     }
 
+  // ConvertToWindowsLocalPath
+  if (kwsys::SystemTools::ConvertToWindowsLocalPath
+  (L"\\\\?\\L:\\Local Mojo\\Hex Power Pack\\Iffy Voodoo") !=
+    "L:\\Local Mojo\\Hex Power Pack\\Iffy Voodoo")
+  {
+    std::cerr
+      << "Problem with ConvertToWindowsShortPath "
+      << "\"\\\\?\\L:\\Local Mojo\\Hex Power Pack\\Iffy Voodoo\""
+      << std::endl;
+    res = false;
+  }
+
+  if (kwsys::SystemTools::ConvertToWindowsLocalPath
+  (L"L:/Local Mojo/Hex Power Pack/Iffy Voodoo") !=
+    "L:\\Local Mojo\\Hex Power Pack\\Iffy Voodoo")
+  {
+    std::cerr
+      << "Problem with ConvertToWindowsShortPath "
+      << "\"L:/Local Mojo/Hex Power Pack/Iffy Voodoo\""
+      << std::endl;
+    res = false;
+  }
+
+  if (kwsys::SystemTools::ConvertToWindowsLocalPath
+  (L"//Foo/Local Mojo/Hex Power Pack/Iffy Voodoo") !=
+    "\\\\Foo\\Local Mojo\\Hex Power Pack\\Iffy Voodoo")
+  {
+    std::cerr
+      << "Problem with ConvertToWindowsShortPath "
+      << "\"//Foo/Local Mojo/Hex Power Pack/Iffy Voodoo\""
+      << std::endl;
+    res = false;
+  }
+
+  if (kwsys::SystemTools::ConvertToWindowsLocalPath
+  (L"\\\\?\\UNC\\Foo\\Local Mojo\\Hex Power Pack\\Iffy Voodoo") !=
+    "\\\\Foo\\Local Mojo\\Hex Power Pack\\Iffy Voodoo")
+  {
+    std::cerr
+      << "Problem with ConvertToWindowsShortPath "
+      << "\"\\\\?\\UNC\\Foo\\Local Mojo\\Hex Power Pack\\Iffy Voodoo\""
+      << std::endl;
+    res = false;
+  }
+
+  if (kwsys::SystemTools::ConvertToWindowsLocalPath(L"//") !=
+    "\\\\")
+  {
+    std::cerr
+      << "Problem with ConvertToWindowsShortPath "
+      << "\"//\""
+      << std::endl;
+    res = false;
+  }
+
+  if (kwsys::SystemTools::ConvertToWindowsLocalPath(L"\\\\.\\") !=
+    "\\\\.\\")
+  {
+    std::cerr
+      << "Problem with ConvertToWindowsShortPath "
+      << "\"\\\\.\\\""
+      << std::endl;
+    res = false;
+  }
+
+  if (kwsys::SystemTools::ConvertToWindowsLocalPath(L"\\\\.\\X") !=
+    "\\Device\\X")
+  {
+    std::cerr
+      << "Problem with ConvertToWindowsShortPath "
+      << "\"\\\\.\\X\""
+      << std::endl;
+    res = false;
+  }
+
+  if (kwsys::SystemTools::ConvertToWindowsLocalPath(L"\\\\?\\X:") !=
+    "X:")
+  {
+    std::cerr
+      << "Problem with ConvertToWindowsShortPath "
+      << "\"\\\\?\\X:\""
+      << std::endl;
+    res = false;
+  }
+
+  if (kwsys::SystemTools::ConvertToWindowsLocalPath(L"\\\\?\\X:\\") !=
+    "X:\\")
+  {
+    std::cerr
+      << "Problem with ConvertToWindowsShortPath "
+      << "\"\\\\?\\X:\\\""
+      << std::endl;
+    res = false;
+  }
 #endif
 
   if (kwsys::SystemTools::ConvertToWindowsOutputPath

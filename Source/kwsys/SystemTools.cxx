@@ -89,6 +89,7 @@
 // Windows API.
 #if defined(_WIN32)
 # include <windows.h>
+# include <WinBase.h>
 # include <winioctl.h>
 # ifndef INVALID_FILE_ATTRIBUTES
 #  define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
@@ -263,14 +264,38 @@ inline void Realpath(const std::string& path,
   DWORD bufferLen = GetFullPathNameW(tmp.c_str(),
       sizeof(fullpath) / sizeof(fullpath[0]),
       fullpath, &ptemp);
+  bool bufferError;
   if( bufferLen < sizeof(fullpath)/sizeof(fullpath[0]) )
     {
-    resolved_path = KWSYS_NAMESPACE::Encoding::ToNarrow(fullpath);
-    KWSYS_NAMESPACE::SystemTools::ConvertToUnixSlashes(resolved_path);
+    bufferError = false;
+    std::string fullPathNarrow = KWSYS_NAMESPACE::Encoding::ToNarrow(fullpath);
+    if (KWSYS_NAMESPACE::SystemTools::FileIsSymlink(fullPathNarrow))
+      {
+        if (KWSYS_NAMESPACE::SystemTools::ReadSymlink(fullPathNarrow, resolved_path))
+        {
+          return;
+        }
+      }
+    else
+      {
+      resolved_path = fullPathNarrow;
+      KWSYS_NAMESPACE::SystemTools::ConvertToUnixSlashes(resolved_path);
+      return;
+      }
     }
-  else if(errorMessage)
+  else if (!errorMessage)
     {
-    if(bufferLen)
+    resolved_path = path;
+    return;
+    }
+  else
+    {
+    bufferError = true;
+    }
+
+  if(errorMessage)
+    {
+    if(bufferError)
       {
       *errorMessage = "Destination path buffer size too small.";
       }
@@ -292,10 +317,6 @@ inline void Realpath(const std::string& path,
       }
 
     resolved_path = "";
-    }
-  else
-    {
-    resolved_path = path;
     }
 }
 #else
@@ -2140,6 +2161,60 @@ SystemTools::ConvertToWindowsExtendedPath(const std::string &source)
   // unchanged
   return Encoding::ToWide(source);
 }
+
+// Convert UNC style paths to local paths
+std::string
+SystemTools::ConvertToWindowsLocalPath(const std::wstring& wsource)
+{
+  // Resolve any relative paths
+  DWORD wfull_len;
+
+  /* The +3 is a workaround for a bug in some versions of GetFullPathNameW that
+  * won't return a large enough buffer size if the input is too small */
+  wfull_len = GetFullPathNameW(wsource.c_str(), 0, NULL, NULL) + 3;
+  std::vector<wchar_t> wfull(wfull_len);
+  GetFullPathNameW(wsource.c_str(), wfull_len, &wfull[0], NULL);
+
+  std::string full = Encoding::ToNarrow(wfull.data());
+  size_t full_len = full.length();
+
+  if (full_len >= 2 && isalpha(full[0]) && full[1] == ':')
+    { /* C:\Foo\bar\FooBar.txt */
+    return full;
+    }
+  else if (full_len >= 2 && full[0] == '\\' && full[1] == '\\')
+    { /* Starts with \\ */
+    if (full_len >= 4 && full[2] == '?' && full[3] == '\\')
+      { /* Starts with \\?\ */
+      if (full_len >= 8 && full[4] == 'U' && full[5] == 'N' &&
+        full[6] == 'C' && full[7] == '\\')
+        { /* \\?\UNC\Foo\bar\FooBar.txt */
+        return "\\" + std::string(&full[7]);
+        }
+      else if (full_len >= 6 && isalpha(full[4]) && full[5] == ':')
+        { /* \\?\C:\Foo\bar\FooBar.txt */
+        return std::string(&full[4]);
+        }
+      else if (full_len >= 5)
+        { /* \\?\Foo\bar\FooBar.txt */
+        return std::string(&full[4]);
+        }
+      }
+    else if (full_len >= 4 && full[2] == '.' && full[3] == '\\')
+      { /* Starts with \\.\ a device name */
+      if (full_len >= 6 && isalpha(full[4]) && full[5] == ':')
+        { /* \\.\C:\Foo\bar\FooBar.txt */
+        return std::string(&full[4]);
+        }
+      else if (full_len >= 5)
+        { /* \\.\Foo\bar\ Device name is left unchanged */
+        return "\\Device" + std::string(&full[3]);
+        }
+    }
+  }
+
+  return full;
+}
 #endif
 
 // change // to /, and escape any spaces in the path
@@ -3378,27 +3453,83 @@ bool SystemTools::FileIsSymlink(const std::string& name)
 #endif
 }
 
-#if defined(_WIN32) && !defined(__CYGWIN__)
-bool SystemTools::CreateSymlink(const std::string&, const std::string&)
-{
-  return false;
-}
-#else
 bool SystemTools::CreateSymlink(const std::string& origName, const std::string& newName)
 {
-  return symlink(origName.c_str(), newName.c_str()) >= 0;
-}
-#endif
-
 #if defined(_WIN32) && !defined(__CYGWIN__)
-bool SystemTools::ReadSymlink(const std::string&, std::string&)
-{
-  return false;
-}
+  // this failes with GetLastError() == ERROR_PRIVILEGE_NOT_HELD (0x522)
+  // if the user does not have the SeCreateSymbolicLinkPrivilege
+  return CreateSymbolicLinkW(
+    ConvertToWindowsExtendedPath(newName).c_str(),    // convert symlink path to extended format
+    Encoding::ToWide(origName).c_str(),               // keep symlink content unchanged
+    FileIsDirectory(origName) ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0) != 0;
 #else
+  return symlink(origName.c_str(), newName.c_str()) >= 0;
+#endif
+}
+
 bool SystemTools::ReadSymlink(const std::string& newName,
                               std::string& origName)
 {
+#if defined(_WIN32) && !defined(__CYGWIN__)
+  // create a handle to the symlink
+  HANDLE symlinkHandle = CreateFile(
+    // convert to extended path to avoid MAX_PATH limit
+    ConvertToWindowsExtendedPath(newName).c_str(),
+    // get Read access
+    GENERIC_READ,
+    // give other processes full access to the file
+    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    // default security descriptor
+    nullptr,
+    // open if existing (no new creation)
+    OPEN_EXISTING,
+    // disable normal reparse point processing to get access to the symlink itself
+    FILE_FLAG_OPEN_REPARSE_POINT,
+    // template file can be ignored because of 'OPEN_EXISTING'
+    nullptr);
+
+  if (symlinkHandle == INVALID_HANDLE_VALUE)
+    return false;
+
+  DWORD count = 0;
+  // from Ntifs.h REPARSE_DATA_BUFFER struct
+  struct SYMBOLIC_LINK_REPARSE_DATA_BUFFER {
+    ULONG  ReparseTag;
+    USHORT ReparseDataLength;
+    USHORT Reserved;
+    USHORT SubstituteNameOffset;
+    USHORT SubstituteNameLength;
+    USHORT PrintNameOffset;
+    USHORT PrintNameLength;
+    ULONG  Flags;
+    WCHAR  PathBuffer[KWSYS_SYSTEMTOOLS_MAXPATH+1];
+  };
+
+  SYMBOLIC_LINK_REPARSE_DATA_BUFFER dataBuffer;
+  bool success = DeviceIoControl(
+    symlinkHandle,
+    // get the reparse point data
+    FSCTL_GET_REPARSE_POINT,
+    // no input data required
+    nullptr, 0,
+    // output buffer and size in bytes
+    &dataBuffer, sizeof(SYMBOLIC_LINK_REPARSE_DATA_BUFFER) - sizeof(WCHAR),
+    // number of bytes stored the the output buffer
+    &count,
+    nullptr) != 0;
+
+  if (!success)
+    return false;
+
+  // 'dataBuffer.PrintNameOffset' and 'dataBuffer.PrintNameLength' are in bytes
+  USHORT printNameOffset = dataBuffer.PrintNameOffset / sizeof(WCHAR);
+  USHORT printNameLength = dataBuffer.PrintNameLength / sizeof(WCHAR);
+
+  dataBuffer.PathBuffer[printNameOffset + printNameLength] = 0;
+  origName = ConvertToWindowsLocalPath(&dataBuffer.PathBuffer[printNameOffset]);
+  ConvertToUnixSlashes(origName);
+  return true;
+#else
   char buf[KWSYS_SYSTEMTOOLS_MAXPATH+1];
   int count =
     static_cast<int>(readlink(newName.c_str(), buf, KWSYS_SYSTEMTOOLS_MAXPATH));
@@ -3413,8 +3544,8 @@ bool SystemTools::ReadSymlink(const std::string& newName,
     {
     return false;
     }
-}
 #endif
+}
 
 int SystemTools::ChangeDirectory(const std::string& dir)
 {

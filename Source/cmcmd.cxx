@@ -87,6 +87,7 @@ void CMakeCommandUsage(const char* program)
     << "  time command [args...]    - run command and return elapsed time\n"
     << "  touch file                - touch a file.\n"
     << "  touch_nocreate file       - touch a file but do not create it.\n"
+    << "  create_symlink old new    - create a symbolic link new -> old\n"
 #if defined(_WIN32) && !defined(__CYGWIN__)
     << "Available on Windows only:\n"
     << "  delete_regv key           - delete registry value\n"
@@ -95,9 +96,6 @@ void CMakeCommandUsage(const char* program)
     << "  env_vs9_wince sdkname     - displays a batch file which sets the "
        "environment for the provided Windows CE SDK installed in VS2008\n"
     << "  write_regv key value      - write registry value\n"
-#else
-    << "Available on UNIX only:\n"
-    << "  create_symlink old new    - create a symbolic link new -> old\n"
 #endif
     ;
   /* clang-format on */
@@ -957,12 +955,8 @@ bool cmcmd::SymlinkInternal(std::string const& file, std::string const& link)
       cmSystemTools::FileIsSymlink(link)) {
     cmSystemTools::RemoveFile(link);
   }
-#if defined(_WIN32) && !defined(__CYGWIN__)
-  return cmSystemTools::CopyFileAlways(file.c_str(), link.c_str());
-#else
   std::string linktext = cmSystemTools::GetFilenameName(file);
   return cmSystemTools::CreateSymlink(linktext, link);
-#endif
 }
 
 static void cmcmdProgressReport(std::string const& dir, std::string const& num)
